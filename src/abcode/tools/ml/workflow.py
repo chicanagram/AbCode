@@ -33,6 +33,10 @@ from abcode.tools.ml.hyperparameter_tuning import (
     select_best_params_from_candidates,
     tune_model_hyperparameters,
 )
+from abcode.tools.ml.fit_svd import (
+    fit_transform_svd_train_test,
+    resolve_svd_feature_config,
+)
 from abcode.tools.ml.splits import generate_splits, generate_progressive_splits
 
 
@@ -731,6 +735,10 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                 feature_files = [str(x).strip() for x in list(feature_files_raw) if str(x).strip()]
                 if not feature_files:
                     raise ValueError(f"feature_combinations_dict['{feature_label}'] must contain at least one feature file name.")
+                feature_files, svd_n_components = resolve_svd_feature_config(
+                    feature_label=feature_label,
+                    feature_files=feature_files,
+                )
                 split_key = str(split_type).strip().lower()
 
                 if split_key == "custom" and custom_test_dataset_fname:
@@ -862,6 +870,13 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
                         X_train, X_test = X_all[train_idx], X_all[test_idx]
                         y_train, y_test = y_all[train_idx], y_all[test_idx]
+                        if svd_n_components is not None:
+                            X_train, X_test, _ = fit_transform_svd_train_test(
+                                X_train=X_train,
+                                X_test=X_test,
+                                n_components=svd_n_components,
+                                random_state=split_seed,
+                            )
                         if show_progress:
                             print(
                                 "[eval-start] "
@@ -1043,8 +1058,16 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             n_train=int(len(y_all)),
                             feature_ntrain_param_presets=feature_ntrain_param_presets,
                         )
+                        X_full = X_all
+                        if svd_n_components is not None:
+                            X_full, _, _ = fit_transform_svd_train_test(
+                                X_train=X_all,
+                                X_test=None,
+                                n_components=svd_n_components,
+                                random_state=split_seed,
+                            )
                         model = build_model(model_name=model_name, task_type=task_type, params=params)
-                        model.fit(X_all, y_all)
+                        model.fit(X_full, y_all)
 
                         if train_full_data_model and save_trained_models:
                             model_path = model_dir / f"{run_label}__{feature_label}__{target_col}__full__{model_name}.pkl"
