@@ -15,6 +15,13 @@ class DatasetBundle:
     dataset_df: pd.DataFrame
 
 
+@dataclass
+class FeatureBlock:
+    feature_name: str
+    start_col: int
+    end_col: int
+
+
 def _load_array(path: Path) -> np.ndarray:
     suffix = path.suffix.lower()
     if suffix == ".npy":
@@ -106,8 +113,23 @@ def build_feature_matrix(
     feature_files: Sequence[str],
     feature_prefix: str = "",
 ) -> np.ndarray:
+    X, _ = build_feature_matrix_with_blocks(
+        encodings_dir=encodings_dir,
+        feature_files=feature_files,
+        feature_prefix=feature_prefix,
+    )
+    return X
+
+
+def build_feature_matrix_with_blocks(
+    encodings_dir: Path,
+    feature_files: Sequence[str],
+    feature_prefix: str = "",
+) -> tuple[np.ndarray, list[FeatureBlock]]:
     arrays: List[np.ndarray] = []
+    feature_blocks: List[FeatureBlock] = []
     expected_n: Optional[int] = None
+    start_col = 0
 
     for feature_file in feature_files:
         feature_path: Path
@@ -129,10 +151,19 @@ def build_feature_matrix(
                 f"expected {expected_n}, got {arr.shape[0]} from {feature_path.name}"
             )
         arrays.append(arr)
+        end_col = start_col + int(arr.shape[1])
+        feature_blocks.append(
+            FeatureBlock(
+                feature_name=str(feature_file),
+                start_col=start_col,
+                end_col=end_col,
+            )
+        )
+        start_col = end_col
 
     if not arrays:
         raise ValueError("No feature files were provided for this feature combination.")
-    return np.concatenate(arrays, axis=1)
+    return np.concatenate(arrays, axis=1), feature_blocks
 
 
 def load_dataset_table(dataset_path: Path) -> pd.DataFrame:

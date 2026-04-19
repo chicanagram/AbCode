@@ -13,6 +13,14 @@ CLASSICAL_ENCODING_FEATURE_SETS = [
     "georgiev_mean_pooled",
 ]
 
+PHYSICOCHEMICAL_ENCODING_FEATURE_SETS = [
+    'length',
+    'aac',
+    'aaindex1',
+    'ctdc',
+    'ctdt',
+]
+
 # --- PLM feature sets ---
 PLM_MODELS_DICT = {
     "esm2-650m": [33],

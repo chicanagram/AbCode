@@ -10,20 +10,20 @@ from sklearn.decomposition import TruncatedSVD
 _SVD_SUFFIX_RE = re.compile(r"^(?P<base>.+?)_svd(?P<n_components>\d+)$", re.IGNORECASE)
 
 
-def parse_svd_signature(feature_label: str) -> tuple[str, Optional[int]]:
+def parse_svd_signature(feature_name: str) -> tuple[str, Optional[int]]:
     """
-    Parse feature labels with optional trailing SVD signature: '<label>_svd{p}'.
-    Returns (base_label, n_components). If no signature is present, n_components is None.
+    Parse an optional trailing SVD signature from a feature name like '<feature_name>_svd{p}'.
+    Returns (base_feature_name, n_components). If no signature is present, n_components is None.
     """
-    label = str(feature_label).strip()
-    if not label:
+    raw_name = str(feature_name).strip()
+    if not raw_name:
         return "", None
-    match = _SVD_SUFFIX_RE.match(label)
+    match = _SVD_SUFFIX_RE.match(raw_name)
     if not match:
-        return label, None
-    base_label = str(match.group("base")).strip()
+        return raw_name, None
+    base_name = str(match.group("base")).strip()
     n_components = int(match.group("n_components"))
-    return base_label, n_components
+    return base_name, n_components
 
 
 def fit_transform_svd_train_test(
@@ -57,44 +57,15 @@ def fit_transform_svd_train_test(
     return X_train_out, X_test_out, svd
 
 
-def resolve_svd_feature_config(
-    *,
-    feature_label: str,
+def resolve_feature_svd_specs(
     feature_files: Sequence[str],
-) -> tuple[list[str], Optional[int]]:
+) -> list[tuple[str, Optional[int]]]:
     """
-    Resolve SVD config from feature label and normalize feature file names.
-    If feature_label uses '<label>_svd{p}', matching feature file suffixes '_svd{p}'
-    are stripped before loading raw feature arrays.
+    Parse per-feature SVD directives from entries like '<feature_name>_svd{p}'.
+    Returns a list aligned to feature_files as (base_feature_name, n_components_or_none).
     """
-    _, svd_n_components = parse_svd_signature(feature_label)
-    normalized_feature_files = [str(x).strip() for x in feature_files if str(x).strip()]
-    if svd_n_components is None:
-        inferred_values = set()
-        for feature_file in normalized_feature_files:
-            _, file_svd_n_components = parse_svd_signature(feature_file)
-            if file_svd_n_components is not None:
-                inferred_values.add(int(file_svd_n_components))
-        if len(inferred_values) > 1:
-            raise ValueError(
-                "Multiple SVD signatures found across feature files without a label-level signature: "
-                f"feature_label='{feature_label}', svd_values={sorted(inferred_values)}."
-            )
-        if len(inferred_values) == 1:
-            svd_n_components = int(next(iter(inferred_values)))
-        else:
-            return normalized_feature_files, None
-
-    out: list[str] = []
-    for feature_file in normalized_feature_files:
-        base_feature_file, file_svd_n_components = parse_svd_signature(feature_file)
-        if file_svd_n_components is None:
-            out.append(feature_file)
-            continue
-        if file_svd_n_components != svd_n_components:
-            raise ValueError(
-                "SVD signature mismatch between feature label and feature file: "
-                f"feature_label='{feature_label}', feature_file='{feature_file}'."
-            )
-        out.append(base_feature_file)
-    return out, svd_n_components
+    specs: list[tuple[str, Optional[int]]] = []
+    for feature_file in feature_files:
+        base_feature_file, svd_n_components = parse_svd_signature(str(feature_file).strip())
+        specs.append((base_feature_file, svd_n_components))
+    return specs

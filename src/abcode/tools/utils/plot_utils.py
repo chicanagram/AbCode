@@ -1,4 +1,138 @@
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+def get_corrmat_corrlist(
+        df,
+        method='spearman',
+        sort_corrlist=True,
+        csv_fname=None,
+        savefig=None,
+        plot_corrmat=True,
+        plot_clustermap=False,
+        use_abs_vals=True,
+        annotate_corrmap=False,
+        labeltop=False,
+        cmap='viridis',
+        set_diagonal_to_nan=False
+):
+
+    # calculate correlation matrix
+    corr_mat = df.corr(numeric_only=True, method=method)
+    cols = corr_mat.columns.tolist()
+    rows = list(corr_mat.index)
+    n = len(cols)
+
+    # # get cols with any NaNs
+    # vars_w_nan = []
+    # for col in cols:
+    #     if corr_mat.loc[:, col].isnull().all():
+    #         vars_w_nan.append(col)
+    # corr_mat = corr_mat.dropna(how='all', axis=1)
+    # corr_mat = corr_mat.dropna(how='all', axis=0)
+    # for col in cols:
+    #     if col in corr_mat and corr_mat.loc[:, col].isnull().any():
+    #         vars_w_nan.append(col)
+    #
+    # # remove rows and columns with any NaNs
+    # cols_nonan = [c for c in cols if c not in vars_w_nan]
+    # rows_nonan = [r for r in rows if r not in vars_w_nan]
+    # corr_mat = corr_mat.loc[rows_nonan, cols_nonan]
+    # cols = cols_nonan
+    # rows = rows_nonan
+
+    # get absolute values
+    if use_abs_vals:
+        corr_mat = corr_mat.abs()
+
+    # save correlation matrix as csv
+    if csv_fname is not None:
+        corr_mat.round(3).to_csv(f'{csv_fname}.csv')
+
+    # convert correlation matrix into list of pairs and corresponding correlations
+    corr_all = {}
+    # iterate through every element of corr_mat
+    for i, row in enumerate(rows):
+        for j, col in enumerate(cols):
+            if row != col:
+                pair = [row, col]
+                pair.sort()
+                pair = tuple(pair)
+                if pair not in corr_all:
+                    corr_all.update({pair: float(corr_mat.loc[row, col])})
+
+    # sort correlation data in descending order of correlations
+    index = []
+    corrs = []
+    for k, v in corr_all.items():
+        index.append(k)
+        corrs.append(v)
+    corr_all = pd.DataFrame(corrs, columns=['corr'], index=index)
+    corr_all['corr_abs'] = corr_all['corr'].abs()
+    if sort_corrlist:
+        corr_all = corr_all.sort_values(by='corr_abs', ascending=False)
+
+    # set diagonal to zero
+    corr_mat_to_plot = corr_mat.copy()
+    if set_diagonal_to_nan:
+        np.fill_diagonal(corr_mat_to_plot.values, np.nan)
+
+    # plot correlation matrix
+    if plot_corrmat:
+        fig, ax = plt.subplots(1, 1, figsize=(n/20*8, n/20*8))
+        if use_abs_vals:
+            heatmap(corr_mat_to_plot.to_numpy(), ax=ax, datamin=0, datamax=1,
+                    logscale_cmap=False, annotate=None, row_labels=rows, col_labels=cols, labeltop=labeltop, c=cmap)
+        else:
+            heatmap(corr_mat_to_plot.to_numpy(), ax=ax, datamin=-1, datamax=1,
+                    logscale_cmap=False, annotate=None, row_labels=rows, col_labels=cols, labeltop=labeltop, c=cmap)
+        if annotate_corrmap:
+            for i in range(corr_mat_to_plot.shape[0]):
+                for j in range(corr_mat_to_plot.shape[1]):
+                    txt = str(round(corr_mat_to_plot[i,j],2))
+                    ax.text(j-0.25,i+0.1, txt, fontsize=7)
+        ax.grid(None)
+        if savefig is not None:
+            fig.savefig(f'{savefig}.png', bbox_inches='tight')
+
+    # get clustermap
+    if plot_clustermap:
+        cl = sns.clustermap(corr_mat, cmap=cmap, figsize=(12, 12), yticklabels=True, xticklabels=True)
+        cl.ax_heatmap.set_yticklabels(cl.ax_heatmap.get_ymajorticklabels(), fontsize=7)
+        cl.ax_heatmap.set_xticklabels(cl.ax_heatmap.get_xmajorticklabels(), fontsize=7)
+        cl.fig.suptitle('Cluster map of selected features', fontsize=16)
+        # plt.title(f'Cluster map of {figtitle}', fontsize=16, loc='center')
+        if savefig is not None:
+            plt.savefig(f"{savefig}_clustermap.png",  bbox_inches='tight')
+
+    return corr_mat, corr_all
+
+
+def get_high_correlation_pairs(corr_all, corr_thres, print_out=True):
+    # filter by corr_thres
+    corr_selected = corr_all[corr_all.corr_abs > corr_thres]
+    index_selected = list(corr_selected.index)
+    # print list of pairs with high correlations
+    if print_out:
+        for i in range(len(corr_selected)):
+            print(i, f"({index_selected[i][0]}, {index_selected[i][1]}):", round(
+                corr_selected.iloc[i]['corr'], 4))
+    return corr_selected
+
+def get_dict_of_features_with_highcorr(corr_mat, corr_thres):
+    highcorr_vars_dict = {}
+    rows = list(corr_mat.index)
+    for i, xvar in enumerate(rows):
+        corr_mat_row = corr_mat.loc[xvar]
+        high_corr_vars = list(
+            corr_mat_row[corr_mat_row.abs() > corr_thres].index)
+        high_corr_vars.remove(xvar)
+        highcorr_vars_dict[xvar] = high_corr_vars
+        print(i, xvar, ':', *high_corr_vars)
+    return highcorr_vars_dict
+
 
 def symlog(data):
     idx_pos = np.where(data > 0)
@@ -18,8 +152,9 @@ def annotate_heatmap(array_2D, ax, ndecimals=2, fontsize=8):
         ax.text(i,j,label,ha='center',va='center', color='0.8', fontsize=fontsize, fontweight='bold')
 
 
-def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None, datamax=None, logscale_cmap=False,
-            annotate=None, row_labels=None, col_labels=None, show_gridlines=True, fontsize=8):
+def heatmap(array, c='virdis', ax=None, cbar_kw={}, cbarlabel="", datamin=None, datamax=None, logscale_cmap=False,
+            annotate=None, row_labels=None, col_labels=None, show_gridlines=True, labeltop=False, rotation=90,
+            show_colorbar=True, fontsize=8):
     """
     Create a heatmap from a numpy array and two lists of labels.
 
@@ -41,8 +176,6 @@ def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None,
     **kwargs
         All other arguments are forwarded to `imshow`.
     """
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     if not ax:
         ax = plt.gca()
@@ -87,22 +220,25 @@ def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None,
     colormap = cmap(norm(data_cmap))
 
     # Set the positions of nan values in colormap to 'lime'
-    colormap[naninds[0], naninds[1], :3] = 0, 1, 0
+    colormap[naninds[0], naninds[1], :3] = 1, 1, 1  # 0,1,0
     colormap[infinds[0], infinds[1], :3] = 1, 1, 1
 
     # plot colormap
     im = ax.imshow(colormap, interpolation='nearest')
 
     # Create colorbar
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="3%", pad=0.07)
-    cbar = ax.figure.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax)
+    if show_colorbar:
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="3%", pad=0.07)
+        cbar = ax.figure.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax)
 
-    if logscale_cmap == True:
-        cbar_labels = cbar.ax.get_yticks()
-        cbar.set_ticks(cbar_labels)
-        cbar_labels_unlog = list(np.round(np.exp(np.array(cbar_labels)), 2))
-        cbar.set_ticklabels(cbar_labels_unlog)
+        if logscale_cmap == True:
+            cbar_labels = cbar.ax.get_yticks()
+            cbar.set_ticks(cbar_labels)
+            cbar_labels_unlog = list(np.round(np.exp(np.array(cbar_labels)), 2))
+            cbar.set_ticklabels(cbar_labels_unlog)
+    else:
+        cbar = None
 
     # Turn off gridlines if required
     ax.tick_params(axis='both', which='both', length=0, gridOn=show_gridlines)
@@ -111,15 +247,19 @@ def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None,
     ax.set_xticks(np.arange(data.shape[1]))
     ax.set_yticks(np.arange(data.shape[0]))
     # ... and label them with the respective list entries.
-    ax.set_xticklabels(col_labels, fontsize=fontsize, ha="right")
+
     ax.set_yticklabels(row_labels, fontsize=fontsize)
 
-    # Let the horizontal axes labeling appear on top.
-    ax.tick_params(top=False, bottom=True,
-                   labeltop=False, labelbottom=True)
+    # Let the horizontal axes labeling appear on top or bottom.
+    if labeltop:
+        ax.tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+        ax.set_xticklabels(col_labels, fontsize=fontsize, ha="left")
+    else:
+        ax.tick_params(top=False, bottom=True, labeltop=False, labelbottom=True)
+        ax.set_xticklabels(col_labels, fontsize=fontsize, ha="right")
 
     # Rotate the tick labels and set their alignment.
-    plt.setp(ax.get_xticklabels(), rotation=90,
+    plt.setp(ax.get_xticklabels(), rotation=rotation,
              rotation_mode="anchor")
 
     # Annotate
@@ -128,7 +268,7 @@ def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None,
             ndecimals = annotate
         else:
             ndecimals = 3
-        annotate_heatmap(array, ax, ndecimals=ndecimals, fontsize=fontsize)
+        annotate_heatmap(array, ax, ndecimals=ndecimals)
 
     # Turn spines off and create white grid.
     for edge, spine in ax.spines.items():
@@ -141,6 +281,7 @@ def heatmap(array, c='viridis', ax=None, cbar_kw={}, cbarlabel="", datamin=None,
     ax.tick_params(which="minor", bottom=False, left=False)
 
     return im, cbar, ax
+
 
 def plot_variant_heatmap(arr, seq, N_res_per_heatmap_row, aa_list, seq_name=None, savefig=None, figtitle=None, c='bwr'):
     import matplotlib.pyplot as plt

@@ -80,39 +80,6 @@ GEORGIEV_AA_TO_VECTOR = {
     for aa in aaList
 }
 
-def load_sequences_csv(csv_path, sequence_col='sequence', sequence_base_col='sequence_base'):
-    """
-    Load mutant/base sequence columns from a CSV file.
-
-    Args:
-        csv_path: Input CSV path.
-        sequence_col: Column containing mutant/target sequences.
-        sequence_base_col: Optional base/wildtype sequence column.
-
-    Returns:
-        Tuple `(sequence_sequence_base_list_or_none, sequence_list)`.
-    """
-    df = pd.read_csv(csv_path)
-    if sequence_col not in df.columns:
-        raise ValueError(f"Column '{sequence_col}' not found in {csv_path}")
-    if sequence_base_col in df.columns:
-        sequence_sequence_base_list = df[sequence_base_col].astype(str).tolist()
-    else:
-        sequence_sequence_base_list = None
-    sequence_list = df[sequence_col].astype(str).tolist()
-    return sequence_sequence_base_list, sequence_list
-
-
-def load_sequences_fasta(fasta_path):
-    sequence_list, _, _ = fetch_sequences_from_fasta(fasta_path)
-    return None, sequence_list
-
-
-def get_max_length(sequences, max_length=None):
-    if max_length is not None:
-        return max_length
-    return max(len(seq) for seq in sequences)
-
 
 def one_hot_encode_sequence(sequence, max_length):
     one_hot = np.zeros((max_length, len(aaList)), dtype=np.float32)
@@ -190,26 +157,6 @@ def _mean_pool_matrices(matrices: Sequence[np.ndarray]) -> np.ndarray:
     """Mean-pool residue axis for each (L, F) matrix -> (N, F)."""
     pooled = [np.asarray(m).mean(axis=0) for m in matrices]
     return np.asarray(pooled, dtype=np.float32)
-
-
-def encode_sequences(sequences, encoder_name, max_length=None):
-    """
-    Encode a list of amino-acid sequences with selected encoder backend.
-
-    Args:
-        sequences: List of sequence strings.
-        encoder_name: One of keys in `ENCODER_REGISTRY`.
-        max_length: Optional fixed sequence length for padding/truncation.
-
-    Returns:
-        Numpy array shaped `(n_sequences, max_length, n_features)`.
-    """
-    if encoder_name not in CLASSICAL_ENCODER_REGISTRY:
-        raise ValueError(f"Unknown encoder '{encoder_name}'. Available: {sorted(CLASSICAL_ENCODER_REGISTRY)}")
-    max_len = get_max_length(sequences, max_length=max_length)
-    encode_fn = CLASSICAL_ENCODER_REGISTRY[encoder_name]
-    encoded = [encode_fn(seq, max_len) for seq in sequences]
-    return np.asarray(encoded, dtype=np.float32)
 
 
 def _save_output_matrix(array: np.ndarray, output_path: Path, use_sparse: bool) -> str:

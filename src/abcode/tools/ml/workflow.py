@@ -18,8 +18,10 @@ from abcode.tools.ml.model_registry import (
 )
 from abcode.tools.ml.feature_matrix import (
     build_feature_matrix,
+    build_feature_matrix_with_blocks,
     load_dataset_table,
     prepare_dataset_bundle,
+    FeatureBlock,
 )
 from abcode.tools.ml.feature_coefficients import (
     extract_coefficients,
@@ -35,7 +37,7 @@ from abcode.tools.ml.hyperparameter_tuning import (
 )
 from abcode.tools.ml.fit_svd import (
     fit_transform_svd_train_test,
-    resolve_svd_feature_config,
+    resolve_feature_svd_specs,
 )
 from abcode.tools.ml.splits import generate_splits, generate_progressive_splits
 
@@ -165,8 +167,9 @@ def _build_summary_from_fold_rows(
     grouped = rows_df.groupby(group_cols, dropna=False, sort=False)
     for keys, grp in grouped:
         row = dict(zip(group_cols, keys))
-        row["n_test_pooled"] = int(pd.to_numeric(grp.get("n_test"), errors="coerce").fillna(0).sum())
-        row["n_train"] = float(pd.to_numeric(grp.get("n_train"), errors="coerce").mean())
+        row["p"] = _mean_numeric(grp.get("p"))
+        row["n_test_pooled"] = int(_sum_numeric(grp.get("n_test")))
+        row["n_train"] = _mean_numeric(grp.get("n_train"))
         row["n_folds"] = int(len(grp))
         row["selected_hyperparameters"] = _collapse_param_strings(
             [str(x) for x in grp.get("selected_hyperparameters", pd.Series(dtype=object)).tolist()]
@@ -210,8 +213,9 @@ def _build_summary_from_run_cache_pooled(
             "model_name": model_name,
             "task_type": task_type,
             "eval_group": eval_group,
+            "p": _mean_numeric(cached.get("p")),
             "n_test_pooled": int(len(y_true_all)),
-            "n_train": float(np.mean(cached.get("n_train", [np.nan]))),
+            "n_train": _mean_numeric(cached.get("n_train")),
             "n_folds": int(len(cached["y_true"])),
             "selected_hyperparameters": _collapse_param_strings(cached.get("selected_hyperparameters", [])),
             "hyperparameter_tuning_enabled": bool(hyperparameter_mode != "default"),
@@ -348,6 +352,24 @@ def _round_metric_dict(metrics: Dict[str, Any], ndigits: int = 4) -> Dict[str, A
     return out
 
 
+def _mean_numeric(values: Any) -> float:
+    return float(pd.to_numeric(values, errors="coerce").mean())
+
+
+def _sum_numeric(values: Any) -> float:
+    return float(pd.to_numeric(values, errors="coerce").fillna(0).sum())
+
+
+def _init_pooled_test_cache_entry() -> Dict[str, List[Any]]:
+    return {
+        "y_true": [],
+        "y_pred": [],
+        "n_train": [],
+        "p": [],
+        "selected_hyperparameters": [],
+    }
+
+
 def _params_to_json(params: Dict[str, Any]) -> str:
     return json.dumps(dict(params), sort_keys=True, default=str)
 
@@ -441,9 +463,9 @@ def _drop_invalid_rows_from_xy(
 
 def _summary_progress_row(task_type: str, test_metrics: Dict[str, Any]) -> pd.DataFrame:
     if task_type == "regression":
-        cols = ["test_spearman", "test_pearson", "test_r2", "test_rmse", "n_test_pooled", "n_train", "n_folds"]
+        cols = ["test_spearman", "test_pearson", "test_r2", "test_rmse", "p", "n_test_pooled", "n_train", "n_folds"]
     else:
-        cols = ["test_mcc", "test_accuracy", "test_f1_weighted", "n_test_pooled", "n_train", "n_folds"]
+        cols = ["test_mcc", "test_accuracy", "test_f1_weighted", "p", "n_test_pooled", "n_train", "n_folds"]
     row = {k: test_metrics.get(k, np.nan) for k in cols}
     return pd.DataFrame([row])
 
@@ -457,13 +479,13 @@ def _build_standard_bundle(
     input_filename_prefix: str = "",
 ):
     dataset_df = load_dataset_table(dataset_path)
-    X = build_feature_matrix(
+    X, feature_blocks = build_feature_matrix_with_blocks(
         encodings_dir=enc_dir,
         feature_files=feature_files,
         feature_prefix=input_filename_prefix or dataset_path.stem,
     )
     bundle = prepare_dataset_bundle(dataset_df=dataset_df, X=X, target_col=target_col)
-    return bundle, dataset_df
+    return bundle, dataset_df, feature_blocks
 
 
 def _build_custom_external_bundle(
@@ -476,20 +498,22 @@ def _build_custom_external_bundle(
     target_col: str,
     train_input_filename_prefix: str = "",
     test_input_filename_prefix: str = "",
-) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame, np.ndarray, np.ndarray, List[FeatureBlock]]:
     train_df = load_dataset_table(train_dataset_path)
     test_df = load_dataset_table(test_dataset_path)
 
-    X_train = build_feature_matrix(
+    X_train, train_feature_blocks = build_feature_matrix_with_blocks(
         encodings_dir=train_enc_dir,
         feature_files=feature_files,
         feature_prefix=train_input_filename_prefix or train_dataset_path.stem,
     )
-    X_test = build_feature_matrix(
+    X_test, test_feature_blocks = build_feature_matrix_with_blocks(
         encodings_dir=test_enc_dir,
         feature_files=feature_files,
         feature_prefix=test_input_filename_prefix or test_dataset_path.stem,
     )
+    if train_feature_blocks != test_feature_blocks:
+        raise ValueError("Train/test feature block layouts do not match for custom external bundle.")
 
     train_bundle = prepare_dataset_bundle(dataset_df=train_df, X=X_train, target_col=target_col)
     test_bundle = prepare_dataset_bundle(dataset_df=test_df, X=X_test, target_col=target_col)
@@ -500,7 +524,39 @@ def _build_custom_external_bundle(
     combined_df = pd.concat([train_bundle.dataset_df, test_bundle.dataset_df], axis=0, ignore_index=True)
     train_idx = np.arange(len(train_bundle.y), dtype=int)
     test_idx = np.arange(len(train_bundle.y), len(train_bundle.y) + len(test_bundle.y), dtype=int)
-    return X_all, y_all, combined_df, train_idx, test_idx
+    return X_all, y_all, combined_df, train_idx, test_idx, train_feature_blocks
+
+
+def _apply_feature_block_svd(
+    *,
+    X_train: np.ndarray,
+    X_test: np.ndarray | None,
+    feature_blocks: List[FeatureBlock],
+    feature_svd_components: List[int | None],
+    random_state: int,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    if len(feature_blocks) != len(feature_svd_components):
+        raise ValueError("feature_blocks and feature_svd_components must have the same length.")
+
+    train_parts: List[np.ndarray] = []
+    test_parts: List[np.ndarray] = []
+    for block, n_components in zip(feature_blocks, feature_svd_components):
+        X_train_block = X_train[:, block.start_col:block.end_col]
+        X_test_block = None if X_test is None else X_test[:, block.start_col:block.end_col]
+        if n_components is not None:
+            X_train_block, X_test_block, _ = fit_transform_svd_train_test(
+                X_train=X_train_block,
+                X_test=X_test_block,
+                n_components=n_components,
+                random_state=random_state,
+            )
+        train_parts.append(X_train_block)
+        if X_test_block is not None:
+            test_parts.append(X_test_block)
+
+    X_train_out = np.concatenate(train_parts, axis=1)
+    X_test_out = None if X_test is None else np.concatenate(test_parts, axis=1)
+    return X_train_out, X_test_out
 
 
 def _build_tune_key(
@@ -732,13 +788,12 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
     for target_col in target_col_list:
         for split_type in split_type_list:
             for feature_label, feature_files_raw in feature_combinations_dict.items():
-                feature_files = [str(x).strip() for x in list(feature_files_raw) if str(x).strip()]
-                if not feature_files:
+                requested_feature_files = [str(x).strip() for x in list(feature_files_raw) if str(x).strip()]
+                if not requested_feature_files:
                     raise ValueError(f"feature_combinations_dict['{feature_label}'] must contain at least one feature file name.")
-                feature_files, svd_n_components = resolve_svd_feature_config(
-                    feature_label=feature_label,
-                    feature_files=feature_files,
-                )
+                feature_svd_specs = resolve_feature_svd_specs(requested_feature_files)
+                feature_files = [base_name for base_name, _ in feature_svd_specs]
+                feature_svd_components = [n_components for _, n_components in feature_svd_specs]
                 split_key = str(split_type).strip().lower()
 
                 if split_key == "custom" and custom_test_dataset_fname:
@@ -749,7 +804,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                         test_dataset_dir = test_dataset_dir / custom_test_data_subfolder
                     test_dataset_path = test_dataset_dir / custom_test_dataset_fname
 
-                    X_all, y_all, dataset_df, train_idx, test_idx = _build_custom_external_bundle(
+                    X_all, y_all, dataset_df, train_idx, test_idx, feature_blocks = _build_custom_external_bundle(
                         train_dataset_path=train_dataset_path,
                         test_dataset_path=test_dataset_path,
                         train_enc_dir=train_enc_dir,
@@ -789,7 +844,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                         }
                     ]
                 else:
-                    bundle, dataset_df = _build_standard_bundle(
+                    bundle, dataset_df, feature_blocks = _build_standard_bundle(
                         dataset_path=train_dataset_path,
                         enc_dir=train_enc_dir,
                         feature_files=feature_files,
@@ -870,13 +925,13 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
                         X_train, X_test = X_all[train_idx], X_all[test_idx]
                         y_train, y_test = y_all[train_idx], y_all[test_idx]
-                        if svd_n_components is not None:
-                            X_train, X_test, _ = fit_transform_svd_train_test(
-                                X_train=X_train,
-                                X_test=X_test,
-                                n_components=svd_n_components,
-                                random_state=split_seed,
-                            )
+                        X_train, X_test = _apply_feature_block_svd(
+                            X_train=X_train,
+                            X_test=X_test,
+                            feature_blocks=feature_blocks,
+                            feature_svd_components=feature_svd_components,
+                            random_state=split_seed,
+                        )
                         if show_progress:
                             print(
                                 "[eval-start] "
@@ -951,7 +1006,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             "model_name": model_name,
                             "task_type": task_type,
                             "n": int(X_all.shape[0]),
-                            "p": int(X_all.shape[1]),
+                            "p": int(X_train.shape[1]),
                             "n_train": int(len(train_idx)),
                             "n_test": int(len(test_idx)),
                             "selected_hyperparameters": _params_to_json(params),
@@ -987,11 +1042,12 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             model_name,
                             eval_group,
                         )
-                        cache = pooled_test_cache.setdefault(pool_key, {"y_true": [], "y_pred": [], "n_train": []})
+                        cache = pooled_test_cache.setdefault(pool_key, _init_pooled_test_cache_entry())
                         cache["y_true"].append(np.asarray(y_test))
                         cache["y_pred"].append(np.asarray(yhat_test))
                         cache["n_train"].append(int(len(train_idx)))
-                        cache.setdefault("selected_hyperparameters", []).append(_params_to_json(params))
+                        cache["p"].append(int(X_train.shape[1]))
+                        cache["selected_hyperparameters"].append(_params_to_json(params))
 
                         if save_trained_models:
                             model_path = model_dir / f"{run_label}__{feature_label}__{target_col}__{split_id}__{model_name}.pkl"
@@ -999,7 +1055,8 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                                 "model": model,
                                 "metadata": {
                                     "feature_label": feature_label,
-                                    "feature_files": list(feature_files),
+                                    "feature_files": list(requested_feature_files),
+                                    "resolved_feature_files": list(feature_files),
                                     "split_type": split_info["split_type"],
                                     "split_id": split_id,
                                     "model_name": model_name,
@@ -1058,14 +1115,13 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             n_train=int(len(y_all)),
                             feature_ntrain_param_presets=feature_ntrain_param_presets,
                         )
-                        X_full = X_all
-                        if svd_n_components is not None:
-                            X_full, _, _ = fit_transform_svd_train_test(
-                                X_train=X_all,
-                                X_test=None,
-                                n_components=svd_n_components,
-                                random_state=split_seed,
-                            )
+                        X_full, _ = _apply_feature_block_svd(
+                            X_train=X_all,
+                            X_test=None,
+                            feature_blocks=feature_blocks,
+                            feature_svd_components=feature_svd_components,
+                            random_state=split_seed,
+                        )
                         model = build_model(model_name=model_name, task_type=task_type, params=params)
                         model.fit(X_full, y_all)
 
@@ -1075,7 +1131,8 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                                 "model": model,
                                 "metadata": {
                                     "feature_label": feature_label,
-                                    "feature_files": list(feature_files),
+                                    "feature_files": list(requested_feature_files),
+                                    "resolved_feature_files": list(feature_files),
                                     "split_type": "full",
                                     "split_id": "full",
                                     "model_name": model_name,

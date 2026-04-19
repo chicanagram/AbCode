@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+import pandas as pd
+
+# Allow direct execution of this file via an absolute path by adding the repo's
+# package roots to sys.path before importing local packages.
+SRC_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[4]
+for import_root in (str(SRC_ROOT), str(REPO_ROOT)):
+    if import_root not in sys.path:
+        sys.path.insert(0, import_root)
+
 from abcode.tools.openprotein.openprotein_utils import connect_openprotein_session
+from abcode.core.paths import setup_data_root
+from abcode.tools.utils.struct_utils import convert_cif_to_pdb_pymol
 
 
 def _chain_ids(n: int, start_index: int = 0) -> List[str]:
@@ -175,44 +187,52 @@ def predict_boltz2(
     return summary
 
 
-def _parse_args() -> argparse.Namespace:
-    """
-    Parse CLI arguments for standalone Boltz-2 prediction utility.
-
-    Returns:
-        Parsed argparse namespace with sequences, ligand options, and output paths.
-    """
-    p = argparse.ArgumentParser(description="Run Boltz-2 structure prediction via OpenProtein API.")
-    p.add_argument("--sequence", action="append", default=[], help="Protein sequence. Repeat for multiple proteins.")
-    p.add_argument("--smiles", action="append", default=[], help="Ligand SMILES. Repeat for multiple ligands.")
-    p.add_argument("--ccd", action="append", default=[], help="Ligand CCD code. Repeat for multiple ligands.")
-    p.add_argument("--single-sequence-mode", action="store_true", help="Use Protein.single_sequence_mode instead of MSA.")
-    p.add_argument("--predict-affinity", action="store_true", help="Request affinity output.")
-    p.add_argument("--binder-chain", default=None, help="Binder chain ID for affinity (defaults to first ligand chain).")
-    p.add_argument("--no-wait", action="store_true", help="Submit job and return immediately.")
-    p.add_argument("--out-cif", type=Path, default=Path("outputs/boltz2/boltz2_prediction.cif"))
-    p.add_argument("--out-summary", type=Path, default=Path("outputs/boltz2/boltz2_summary.json"))
-    return p.parse_args()
-
-
-def main() -> None:
-    """
-    CLI entrypoint: run Boltz-2 prediction and print JSON summary.
-    """
-    args = _parse_args()
-    summary = predict_boltz2(
-        sequences=args.sequence,
-        smiles=args.smiles,
-        ccds=args.ccd,
-        use_single_sequence_mode=args.single_sequence_mode,
-        predict_affinity=args.predict_affinity,
-        binder_chain=args.binder_chain,
-        wait=not args.no_wait,
-        out_cif=args.out_cif,
-        out_summary_json=args.out_summary,
-    )
-    print(json.dumps(summary, indent=2))
-
-
 if __name__ == "__main__":
-    main()
+
+    # Edit these directly for local runs when you want file-backed inputs
+    # without passing them on the CLI.
+    data_root, _ = setup_data_root(
+        root_key="biostream-developability-data",
+        required_subfolders=("expdata", "pdb"),
+        project_root=REPO_ROOT,
+    )
+    data_subfolder = "opensource"
+    sequence_fasta: Optional[Path] = None
+    sequence_csv: Optional[Path] = data_root / "expdata" / data_subfolder / f"{data_subfolder}.csv"
+    sequence_cols = ["sequence_vh", "sequence_vl"]
+    smiles_list = []
+    use_single_sequence_mode = False
+    predict_affinity = False
+    binder_chain = None
+
+    if sequence_csv is None:
+        raise ValueError("Set `sequence_csv` or `sequence_fasta` under __main__ before running this script.")
+
+    df = pd.read_csv(sequence_csv)
+    output_dir = data_root / "pdb" / data_subfolder
+    output_dir.mkdir(parents=True, exist_ok=True)
+    missed_struct_indices = []
+
+    for i in range(2, len(df)):
+        print(f'Processing structure {i}...')
+        try:
+            out_cif = output_dir / f"{i}.cif"
+            sequences = df.iloc[i][sequence_cols].tolist()
+            sequences = [str(s).strip() for s in sequences if pd.notna(s) and str(s).strip()]
+            print(len(sequences), sequences)
+            summary = predict_boltz2(
+                sequences=sequences,
+                smiles=smiles_list,
+                use_single_sequence_mode=use_single_sequence_mode,
+                predict_affinity=predict_affinity,
+                binder_chain=binder_chain,
+                wait=True,
+                out_cif=out_cif,
+                out_summary_json=out_cif.with_suffix(".json"),
+            )
+            convert_cif_to_pdb_pymol(str(out_cif), str(out_cif.with_suffix(".pdb")))
+        except Exception as exc:
+            print(exc, f">> Skipping structure {i}")
+            missed_struct_indices.append(i)
+
+    print('Missed structure indices:', missed_struct_indices)

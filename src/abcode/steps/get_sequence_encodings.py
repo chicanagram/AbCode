@@ -20,12 +20,14 @@ import pandas as pd
 from abcode.core.paths import resolve_project_root
 from project_config.feature_registry import (
     CLASSICAL_ENCODING_FEATURE_SETS,
+    PHYSICOCHEMICAL_ENCODING_FEATURE_SETS,
     FEATURE_SETS_DEFAULT,
     PLM_MODELS_DICT,
     PLM_ENCODING_FEATURE_SETS,
 )
 from project_config.variables import address_dict
 from abcode.tools.encodings.classical_encodings import get_classical_encodings
+from abcode.tools.encodings.physicochemical_encodings import get_physicochemical_encodings
 from abcode.tools.encodings.common import _sanitize_name
 from abcode.tools.encodings.plm_encodings import get_plm_encodings
 from abcode.tools.utils.seq_utils import fetch_sequences_from_fasta, get_mutated_sequence, normalize_sequences
@@ -99,13 +101,14 @@ def split_feature_sets(
 
     # Section 2: split by backend ownership.
     classical = [f for f in requested if f in CLASSICAL_ENCODING_FEATURE_SETS]
+    physicochemical =  [f for f in requested if f in PHYSICOCHEMICAL_ENCODING_FEATURE_SETS]
     plm = [f for f in requested if f in PLM_ENCODING_FEATURE_SETS]
 
     # Section 3: reject unknown feature names early.
     unknown = [
         f
         for f in requested
-        if f not in CLASSICAL_ENCODING_FEATURE_SETS and f not in PLM_ENCODING_FEATURE_SETS
+        if f not in CLASSICAL_ENCODING_FEATURE_SETS + PHYSICOCHEMICAL_ENCODING_FEATURE_SETS + PLM_ENCODING_FEATURE_SETS
     ]
     if unknown:
         raise ValueError(
@@ -116,6 +119,7 @@ def split_feature_sets(
     return {
         "requested": requested,
         "classical": classical,
+        "physicochemical": physicochemical,
         "plm": plm,
     }
 
@@ -783,6 +787,8 @@ def get_sequence_encodings(inputs: Dict[str, Any]) -> Dict[str, Any]:
     # Section 5: validate feature/input compatibility.
     if split_sets["classical"] and parsed["sequence_list"] is None:
         raise ValueError("Classical encodings require sequence inputs from CSV/FASTA; base-only mode is unsupported.")
+    if split_sets["physicochemical"] and parsed["sequence_list"] is None:
+        raise ValueError("Physicochemical encodings require sequence inputs from CSV/FASTA; base-only mode is unsupported.")
     if split_sets["plm"] and parsed["sequence_list"] is None:
         non_llr = [f for f in split_sets["plm"] if not str(f).endswith("_LLR")]
         if non_llr:
@@ -802,12 +808,24 @@ def get_sequence_encodings(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
     # Section 7: run encoding generation backend(s) as requested.
     classical_results = {}
+    physicochemical_results = {}
     plm_results = {}
     filename_prefix = str(inputs.get("filename_prefix", "") or "")
 
     if split_sets["classical"]:
         classical_results = get_classical_encodings(
             classical_feature_sets=split_sets["classical"],
+            sequence_list=parsed["sequence_list"],
+            sequence_base_list=parsed["sequence_base_list"],
+            encodings_dir=encodings_dir,
+            filename_prefix=filename_prefix,
+            get_embeddings_for_seq_base=bool(inputs.get("get_embeddings_for_seq_base", False)),
+            max_length=inputs.get("classical_max_length"),
+        )
+
+    if split_sets["physicochemical"]:
+        physicochemical_results = get_physicochemical_encodings(
+            physicochemical_feature_sets=split_sets["physicochemical"],
             sequence_list=parsed["sequence_list"],
             sequence_base_list=parsed["sequence_base_list"],
             encodings_dir=encodings_dir,
