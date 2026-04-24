@@ -208,3 +208,4 @@ __marimo__/
 
 # Large local artifacts
 examples/encodings/opensource/*_per_residue-33.npz
+project_config/local_api_keys.py
