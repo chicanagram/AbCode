@@ -48,8 +48,6 @@ def default_user_inputs() -> Dict[str, Any]:
         "mutres_col": "mutres_idx",
         "random_split_col": "fold_random_5",
         "mutres_split_col": "fold_mutres-modulo_5",
-        "segment_col": "segment_index_0",
-        "segment_index_range": None,
         "contiguous_split_col": "",
         "custom_split_col": "fold_modulo_5",
         "custom_test_value": 0,
@@ -157,8 +155,6 @@ if __name__ == "__main__":
     user_inputs["contiguous_split_col"] = f'fold_contiguous_{user_inputs["k_folds"]}'
     user_inputs["custom_split_col"] = "fold_custom"
     user_inputs["custom_test_value"] = 1
-    user_inputs["segment_col"] = "segment_index_0"
-    user_inputs["segment_index_range"] = None  # e.g. [0, 26] or [24, 26]
 
     # === Custom Test Dataset (Optional) ===
     user_inputs["custom_test_dataset_fname"] = None

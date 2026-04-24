@@ -213,7 +213,7 @@ if __name__ == "__main__":
     output_dir.mkdir(parents=True, exist_ok=True)
     missed_struct_indices = []
 
-    for i in range(2, len(df)):
+    for i in range(323, len(df)):
         print(f'Processing structure {i}...')
         try:
             out_cif = output_dir / f"{i}.cif"

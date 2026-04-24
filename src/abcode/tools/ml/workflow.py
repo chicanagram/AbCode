@@ -39,11 +39,7 @@ from abcode.tools.ml.fit_svd import (
     fit_transform_svd_train_test,
     resolve_feature_svd_specs,
 )
-from abcode.tools.ml.splits import generate_splits, generate_progressive_splits
-
-
-PROGRESSIVE_SPLIT_KEYS = {"random", "mutres-modulo", "mutres_modulo", "custom", "retrospective", "retrospective-segment", "retrospective_segment"}
-CUSTOM_LIKE_KEYS = {"custom", "retrospective", "retrospective-segment", "retrospective_segment"}
+from abcode.tools.ml.splits import generate_splits
 
 
 def _utc_now_label() -> str:
@@ -82,39 +78,6 @@ def _build_metrics_csv_name(task_type: str, suffix: str) -> str:
 def _build_summary_csv_name(task_type: str, suffix: str) -> str:
     clean_suffix = str(suffix or "").strip()
     return f"{task_type}_metrics_summary{clean_suffix}.csv"
-
-
-
-def _parse_segment_index_range(value: Any) -> tuple[int | None, int | None] | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and str(value).strip().lower() in {"", "none", "null", "nan"}:
-        return None
-    if not isinstance(value, (list, tuple)):
-        raise ValueError("segment_index_range must be a list/tuple like [start_idx, end_idx].")
-    if len(value) == 0:
-        return None
-    if len(value) != 2:
-        raise ValueError("segment_index_range must contain exactly two elements: [start_idx, end_idx].")
-
-    def _to_optional_int(v: Any) -> int | None:
-        if v is None:
-            return None
-        s = str(v).strip().lower()
-        if s in {"", "none", "null", "nan"}:
-            return None
-        out = int(v)
-        if out < 0:
-            raise ValueError("segment_index_range values must be >= 0 when provided.")
-        return out
-
-    start_idx = _to_optional_int(value[0])
-    end_idx = _to_optional_int(value[1])
-    if start_idx is None and end_idx is None:
-        return None
-    if start_idx is not None and end_idx is not None and end_idx < start_idx:
-        raise ValueError("segment_index_range end_idx must be >= start_idx.")
-    return start_idx, end_idx
 
 
 def _normalize_hyperparameter_mode(value: Any) -> str:
@@ -160,7 +123,6 @@ def _build_summary_from_fold_rows(
         c
         for c in rows_df.columns
         if c.startswith("test_")
-        and c not in {"test_segment"}
         and pd.api.types.is_numeric_dtype(rows_df[c])
     ]
     out_rows: List[Dict[str, Any]] = []
@@ -720,8 +682,6 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
     mutres_col = str(inputs.get("mutres_col", "mutres_idx")).strip()
     random_split_col = str(inputs.get("random_split_col", f"fold_random_{k_folds}")).strip()
     mutres_split_col = str(inputs.get("mutres_split_col", f"fold_mutres-modulo_{k_folds}")).strip()
-    segment_col = str(inputs.get("segment_col", "segment_index_0")).strip()
-    segment_index_range = _parse_segment_index_range(inputs.get("segment_index_range"))
     contiguous_split_col = str(inputs.get("contiguous_split_col", f"fold_contiguous_{k_folds}")).strip()
 
     custom_split_col = str(inputs.get("custom_split_col", "split")).strip()
@@ -858,57 +818,21 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                         show_progress=show_progress,
                         context=f"target_col={target_col} | split_type={split_type} | feature_combi_name={feature_label}",
                     )
-                    can_use_progressive = split_key in PROGRESSIVE_SPLIT_KEYS
-                    has_segment_data = (
-                        segment_col in dataset_df.columns
-                        and dataset_df[segment_col].dropna().nunique() >= 2
+                    split_defs = generate_splits(
+                        dataset_df=dataset_df,
+                        n_rows=len(dataset_df),
+                        split_type=split_type,
+                        k_folds=k_folds,
+                        kfold_repeats=kfold_repeats,
+                        seed=split_seed,
+                        mutres_col=mutres_col,
+                        random_split_col=random_split_col,
+                        mutres_split_col=mutres_split_col,
+                        contiguous_split_col=contiguous_split_col,
+                        custom_split_col=custom_split_col,
+                        custom_test_value=custom_test_value,
+                        custom_split_indices=custom_split_indices,
                     )
-                    use_progressive = can_use_progressive and has_segment_data
-                    if split_key in CUSTOM_LIKE_KEYS and not use_progressive:
-                        if show_progress:
-                            print(
-                                "[split-skip] custom (retrospective-style) requires segment frontiers "
-                                f"(segment_col='{segment_col}', "
-                                f"segment_index_range={inputs.get('segment_index_range', None)})."
-                            )
-                        continue
-
-                    if use_progressive:
-                        split_defs = generate_progressive_splits(
-                            dataset_df=dataset_df,
-                            split_type=split_type,
-                            segment_col=segment_col,
-                            random_split_col=random_split_col,
-                            mutres_split_col=mutres_split_col,
-                        )
-                        if segment_index_range is not None:
-                            start_idx, end_idx = segment_index_range
-                            split_defs = [
-                                s
-                                for s in split_defs
-                                if (start_idx is None or int(s.get("frontier_idx", 0)) >= start_idx)
-                                and (end_idx is None or int(s.get("frontier_idx", 0)) <= end_idx)
-                            ]
-                        if not split_defs:
-                            raise ValueError(
-                                "No progressive splits remain after applying segment_index_range filter."
-                            )
-                    else:
-                        split_defs = generate_splits(
-                            dataset_df=dataset_df,
-                            n_rows=len(dataset_df),
-                            split_type=split_type,
-                            k_folds=k_folds,
-                            kfold_repeats=kfold_repeats,
-                            seed=split_seed,
-                            mutres_col=mutres_col,
-                            random_split_col=random_split_col,
-                            mutres_split_col=mutres_split_col,
-                            contiguous_split_col=contiguous_split_col,
-                            custom_split_col=custom_split_col,
-                            custom_test_value=custom_test_value,
-                            custom_split_indices=custom_split_indices,
-                        )
 
                 for model_name in model_list:
                     base_params = load_model_params(
@@ -1013,12 +937,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             "hyperparameter_tuning_enabled": bool(hyperparameter_mode != "default"),
                             "hyperparameter_tuning_metric": tuning_metric,
                             "eval_group": eval_group,
-                            "frontier_idx": split_info.get("frontier_idx", np.nan),
-                            "segment_min": split_info.get("segment_min", np.nan),
-                            "segment_max": split_info.get("segment_max", np.nan),
-                            "segments_included": str(split_info.get("segments_included", "")),
                             "data_size_n": split_info.get("data_size_n", int(len(train_idx) + len(test_idx))),
-                            "test_segment": split_info.get("test_segment", np.nan),
                         }
                         row.update({f"test_{k}": v for k, v in test_metrics.items()})
                         row.update({f"train_{k}": v for k, v in train_metrics.items()})
@@ -1031,7 +950,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                                 "[fold-result] "
                                 f"split_id={split_id} | split_name={split_name} | split_type={split_info['split_type']} | "
                                 f"eval_group={eval_group} | data_size_n={row['data_size_n']} | "
-                                f"segments_included={row['segments_included']} | n_train={row['n_train']} | n_test={row['n_test']}"
+                                f"n_train={row['n_train']} | n_test={row['n_test']}"
                             )
                             print(fold_progress.to_string(index=False))
 
