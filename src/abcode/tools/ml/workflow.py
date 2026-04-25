@@ -243,6 +243,7 @@ def _append_fold_predictions(
     model_name: str,
     split_id: int,
     eval_group: str,
+    test_asset: str,
     test_idx: np.ndarray,
     y_test: np.ndarray,
     yhat_test: np.ndarray,
@@ -254,6 +255,7 @@ def _append_fold_predictions(
             "row_index": test_idx,
             "split_id": split_id,
             "eval_group": eval_group,
+            "test_asset": test_asset,
             "y_true": y_test,
             "y_pred": yhat_test,
         }
@@ -330,6 +332,10 @@ def _init_pooled_test_cache_entry() -> Dict[str, List[Any]]:
         "p": [],
         "selected_hyperparameters": [],
     }
+
+
+def _normalize_test_asset(split_info: Dict[str, Any]) -> str:
+    return str(split_info.get("test_asset", "")).strip()
 
 
 def _params_to_json(params: Dict[str, Any]) -> str:
@@ -683,6 +689,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
     random_split_col = str(inputs.get("random_split_col", f"fold_random_{k_folds}")).strip()
     mutres_split_col = str(inputs.get("mutres_split_col", f"fold_mutres-modulo_{k_folds}")).strip()
     contiguous_split_col = str(inputs.get("contiguous_split_col", f"fold_contiguous_{k_folds}")).strip()
+    asset_split_col = str(inputs.get("asset_split_col", "dataset")).strip()
 
     custom_split_col = str(inputs.get("custom_split_col", "split")).strip()
     custom_test_value = inputs.get("custom_test_value", "test")
@@ -829,6 +836,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                         random_split_col=random_split_col,
                         mutres_split_col=mutres_split_col,
                         contiguous_split_col=contiguous_split_col,
+                        asset_split_col=asset_split_col,
                         custom_split_col=custom_split_col,
                         custom_test_value=custom_test_value,
                         custom_split_indices=custom_split_indices,
@@ -844,6 +852,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                     for split_idx, split_info in enumerate(split_defs):
                         split_id = int(split_idx)
                         eval_group = str(split_info.get("eval_group", "all_data"))
+                        test_asset = _normalize_test_asset(split_info)
                         train_idx = np.asarray(split_info["train_idx"], dtype=int)
                         test_idx = np.asarray(split_info["test_idx"], dtype=int)
 
@@ -937,6 +946,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             "hyperparameter_tuning_enabled": bool(hyperparameter_mode != "default"),
                             "hyperparameter_tuning_metric": tuning_metric,
                             "eval_group": eval_group,
+                            "test_asset": test_asset,
                             "data_size_n": split_info.get("data_size_n", int(len(train_idx) + len(test_idx))),
                         }
                         row.update({f"test_{k}": v for k, v in test_metrics.items()})
@@ -949,6 +959,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                             print(
                                 "[fold-result] "
                                 f"split_id={split_id} | split_name={split_name} | split_type={split_info['split_type']} | "
+                                f"test_asset={test_asset or '-'} | "
                                 f"eval_group={eval_group} | data_size_n={row['data_size_n']} | "
                                 f"n_train={row['n_train']} | n_test={row['n_test']}"
                             )
@@ -995,6 +1006,7 @@ def run_supervised_ml_workflow(inputs: Dict[str, Any]) -> Dict[str, Any]:
                                 model_name=model_name,
                                 split_id=split_id,
                                 eval_group=eval_group,
+                                test_asset=test_asset,
                                 test_idx=test_idx,
                                 y_test=y_test,
                                 yhat_test=yhat_test,

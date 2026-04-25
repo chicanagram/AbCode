@@ -1,0 +1,2 @@
+target_col,feature_label,split_type,model_name,task_type,eval_group,p,n_test_pooled,n_train,n_folds,selected_hyperparameters,hyperparameter_tuning_enabled,hyperparameter_tuning_metric,test_spearman,test_pearson,test_r2,test_mae,test_rmse
+acsins_dLmax_ph7.4_avg,physicochemical_seq_all_esm2_seq_embeddings_svd50_georgiev,asset,xgboost,regression,all_data,2069.0,517,413.6,5,"{""learning_rate"": 0.0174427425592466, ""max_depth"": 6, ""n_estimators"": 600, ""random_state"": 42}",True,spearman,0.5189,0.4426,0.0679,5.5361,7.3296

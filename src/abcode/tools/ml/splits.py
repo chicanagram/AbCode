@@ -54,27 +54,65 @@ def _build_custom_split_from_indices(
     return train_idx, test_idx
 
 
-def _splits_from_fold_column(dataset_df: pd.DataFrame, split_col: str, split_type: str) -> List[Dict[str, Any]]:
-    values = dataset_df[split_col]
-    fold_ids = sorted(pd.unique(values.dropna()))
-    idx = np.arange(len(dataset_df))
+def _build_leave_one_group_out_splits(
+    values: pd.Series,
+    *,
+    split_type: str,
+    split_id_prefix: str,
+    extra_key: str | None = None,
+) -> List[Dict[str, Any]]:
+    group_ids = list(pd.unique(values.dropna()))
+    idx = np.arange(len(values))
     splits: List[Dict[str, Any]] = []
-    for fold_id in fold_ids:
-        test_mask = values == fold_id
+    for group_id in group_ids:
+        test_mask = values == group_id
         test_idx = idx[test_mask.to_numpy()]
         train_idx = idx[~test_mask.to_numpy()]
         if len(train_idx) == 0 or len(test_idx) == 0:
             continue
-        splits.append(
-            {
-                "split_type": split_type,
-                "split_id": f"{split_type}_fold_{fold_id}",
-                "train_idx": np.sort(train_idx),
-                "test_idx": np.sort(test_idx),
-            }
-        )
+        split_info = {
+            "split_type": split_type,
+            "split_id": f"{split_id_prefix}_{group_id}",
+            "train_idx": np.sort(train_idx),
+            "test_idx": np.sort(test_idx),
+        }
+        if extra_key:
+            split_info[extra_key] = str(group_id)
+        splits.append(split_info)
+    return splits
+
+
+def _splits_from_fold_column(dataset_df: pd.DataFrame, split_col: str, split_type: str) -> List[Dict[str, Any]]:
+    values = dataset_df[split_col]
+    splits = _build_leave_one_group_out_splits(
+        values,
+        split_type=split_type,
+        split_id_prefix=f"{split_type}_fold",
+    )
     if not splits:
         raise ValueError(f"Fold column '{split_col}' did not produce valid train/test splits.")
+    return splits
+
+
+def _splits_from_asset_column(dataset_df: pd.DataFrame, asset_col: str) -> List[Dict[str, Any]]:
+    if asset_col not in dataset_df.columns:
+        raise KeyError(f"asset split column '{asset_col}' not found in dataset.")
+
+    values = dataset_df[asset_col]
+    asset_ids = [asset_id for asset_id in pd.unique(values.dropna())]
+    if len(asset_ids) < 2:
+        raise ValueError(
+            f"asset split column '{asset_col}' must contain at least 2 unique non-null values for LOO splitting."
+        )
+
+    splits = _build_leave_one_group_out_splits(
+        values,
+        split_type="asset",
+        split_id_prefix="asset",
+        extra_key="test_asset",
+    )
+    if not splits:
+        raise ValueError(f"asset split column '{asset_col}' did not produce valid leave-one-asset-out splits.")
     return splits
 
 
@@ -190,6 +228,7 @@ def generate_splits(
     random_split_col: str,
     mutres_split_col: str,
     contiguous_split_col: str,
+    asset_split_col: str,
     custom_split_col: str,
     custom_test_value: Any,
     custom_split_indices: Optional[Dict[str, Iterable[int]]] = None,
@@ -268,6 +307,9 @@ def generate_splits(
             for i, (tr, te) in enumerate(pairs)
         ]
 
+    if split_key == "asset":
+        return _splits_from_asset_column(dataset_df, asset_col=asset_split_col)
+
     if split_key == "custom":
         if custom_split_indices:
             train_idx, test_idx = _build_custom_split_from_indices(custom_split_indices, n_rows=n_rows)
@@ -287,5 +329,5 @@ def generate_splits(
         ]
 
     raise ValueError(
-        f"Unsupported split_type '{split_type}'. Supported: random, mutres-modulo, contiguous, custom"
+        f"Unsupported split_type '{split_type}'. Supported: random, mutres-modulo, contiguous, asset, custom"
     )

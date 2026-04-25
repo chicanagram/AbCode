@@ -30,7 +30,7 @@ def default_user_inputs() -> Dict[str, Any]:
         "sequence_base": None,
         "target_col": "foldchange_NBD_activity_25C",
         "classification_or_regression": "regression",
-        "split_type_list": ["random", "mutres-modulo", "contiguous", "custom"],
+        "split_type_list": ["random", "mutres-modulo", "contiguous", "asset", "custom"],
         "feature_combinations_dict": {
             "onehot": ["one_hot"],
             "georgiev": ["georgiev"],
@@ -49,6 +49,7 @@ def default_user_inputs() -> Dict[str, Any]:
         "random_split_col": "fold_random_5",
         "mutres_split_col": "fold_mutres-modulo_5",
         "contiguous_split_col": "",
+        "asset_split_col": "dataset",
         "custom_split_col": "fold_modulo_5",
         "custom_test_value": 0,
         "custom_test_dataset_fname": "",
@@ -147,12 +148,13 @@ if __name__ == "__main__":
     user_inputs["classification_or_regression"] = "regression"
 
     # === Split Settings ===
-    user_inputs["split_type_list"] = ['random'] # ["custom", "mutres-modulo", "random"]
+    user_inputs["split_type_list"] = ['random'] # ["random", "asset", "custom", "mutres-modulo"]
     user_inputs["k_folds"] = 5
     user_inputs["random_kfold_repeats"] = 5
     user_inputs["random_split_col"] = f'fold_random_{user_inputs["k_folds"]}'
     user_inputs["mutres_split_col"] = f'fold_mutres-modulo_{user_inputs["k_folds"]}'
     user_inputs["contiguous_split_col"] = f'fold_contiguous_{user_inputs["k_folds"]}'
+    user_inputs["asset_split_col"] = "dataset"
     user_inputs["custom_split_col"] = "fold_custom"
     user_inputs["custom_test_value"] = 1
 
