@@ -1,0 +1,28 @@
+# Core data + notebook stack
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+jupyter
+ipykernel
+
+# Sequence / bio utilities
+biopython
+protlearn
+sympy
+
+# Classical + supervised ML workflows
+scikit-learn
+optuna
+xgboost
+lightgbm
+
+# Protein language model workflows
+torch
+transformers
+esm
+
+# Optional structure / OpenProtein workflows
+openprotein-python
+pymol-open-source
