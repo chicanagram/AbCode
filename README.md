@@ -23,8 +23,7 @@ Typical use cases include:
 ```text
 notebooks/
   00_explore_data_distribution.ipynb
-  00_explore_data_correlations.ipynb
-  01_get_structures_apo_holo.ipynb
+  01_explore_data_correlations.ipynb
   02_get_sequence_encodings.ipynb
   03_train_evaluate_supervised_ML_models.ipynb
 
@@ -51,15 +50,13 @@ examples/
 
 The intended entrypoint is the notebook sequence:
 
-1. [00_explore_data_distribution.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/00_explore_data_distribution.ipynb) and [00_explore_data_correlations.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/00_explore_data_correlations.ipynb) for dataset inspection
-2. [01_get_structures_apo_holo.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/01_get_structures_apo_holo.ipynb) for optional structure generation
+1. [00_explore_data_distribution.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/00_explore_data_distribution.ipynb) and [01_explore_data_correlations.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/00_explore_data_correlations.ipynb) for dataset inspection
 3. [02_get_sequence_encodings.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/02_get_sequence_encodings.ipynb) for feature extraction
 4. [03_train_evaluate_supervised_ML_models.ipynb](/Users/charmainechia/Documents/projects/AbCode/notebooks/03_train_evaluate_supervised_ML_models.ipynb) for supervised learning
 
 The matching step modules live in:
 
 - [get_sequence_encodings.py](/Users/charmainechia/Documents/projects/AbCode/src/abcode/steps/get_sequence_encodings.py)
-- [get_structures_apo_holo.py](/Users/charmainechia/Documents/projects/AbCode/src/abcode/steps/get_structures_apo_holo.py)
 - [train_evaluate_supervised_ml_models.py](/Users/charmainechia/Documents/projects/AbCode/src/abcode/steps/train_evaluate_supervised_ml_models.py)
 
 ## Feature Types
